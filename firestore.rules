@@ -1,0 +1,164 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId} (Firebase Auth UID)
+// Fields:
+//   - name: string (required, 2-100 chars) - User's full name.
+//   - email: string (required, email format) - User's email address.
+//   - role: string (required, enum: ['admin', 'user']) - User's role.
+//   - phone: string (required, regex: /^01[3-9]\d{8}$/) - User's phone number.
+//   - bloodGroup: string (required, enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']) - User's blood group.
+//   - permanentDistrict: string (required, 2-100 chars) - User's permanent district.
+//   - permanentAddress: string (required, 3-500 chars) - User's permanent address.
+//   - currentDistrict: string (required, 2-100 chars) - User's current district.
+//   - currentAddress: string (required, 3-500 chars) - User's current address.
+//   - lastDonationDate: string (optional, YYYY-MM-DD format) - User's last donation date.
+//   - gender: string (required, enum: ['male', 'female']) - User's gender.
+//
+// Collection: donors
+// Document ID: {donorId} (Auto-generated)
+// Fields:
+//   - name: string (required, 2-100 chars) - Donor's name.
+//   - phone: string (required, regex: /^01[3-9]\d{8}$/) - Donor's phone number.
+//   - bloodGroup: string (required, enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']) - Donor's blood group.
+//   - address: string (required, 3-500 chars) - Donor's address.
+//   - createdAt: timestamp (required) - Creation timestamp.
+//
+// Collection: questions
+// Document ID: {questionId} (Auto-generated)
+// Fields:
+//   - name: string (required, 1-100 chars) - Submitter's name.
+//   - text: string (required, 1-2000 chars) - Question/feedback text.
+//   - createdAt: timestamp (required) - Submission timestamp.
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "bangladeshblooddonorscommunity@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidPhone(phone) {
+      return phone is string && phone.matches("^01[3-9]\\d{8}$");
+    }
+
+    function isValidBloodGroup(bg) {
+      return bg in ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
+    }
+
+    function isRecent(time) {
+      return time > request.time - duration.value(5, 'm') && time <= request.time;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['name', 'email', 'role', 'phone', 'bloodGroup', 'gender', 'permanentDistrict', 'permanentAddress', 'currentDistrict', 'currentAddress']) &&
+             hasOnlyAllowedFields(['name', 'email', 'role', 'phone', 'bloodGroup', 'permanentDistrict', 'permanentAddress', 'currentDistrict', 'currentAddress', 'lastDonationDate', 'gender']) &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['admin', 'user'] &&
+             data.phone is string && isValidPhone(data.phone) &&
+             data.bloodGroup is string && isValidBloodGroup(data.bloodGroup) &&
+             data.gender in ['male', 'female'] &&
+             data.permanentDistrict is string && data.permanentDistrict.size() >= 2 && data.permanentDistrict.size() <= 100 &&
+             data.permanentAddress is string && data.permanentAddress.size() >= 3 && data.permanentAddress.size() <= 500 &&
+             data.currentDistrict is string && data.currentDistrict.size() >= 2 && data.currentDistrict.size() <= 100 &&
+             data.currentAddress is string && data.currentAddress.size() >= 3 && data.currentAddress.size() <= 500 &&
+             (!('lastDonationDate' in data) || (data.lastDonationDate is string && data.lastDonationDate.matches("^\\d{4}-\\d{2}-\\d{2}$")));
+    }
+
+    function isValidDonor(data) {
+      return hasRequiredFields(['name', 'phone', 'bloodGroup', 'address', 'createdAt']) &&
+             hasOnlyAllowedFields(['name', 'phone', 'bloodGroup', 'address', 'createdAt', 'lastDonationDate', 'userId']) &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+             data.phone is string && isValidPhone(data.phone) &&
+             data.bloodGroup is string && isValidBloodGroup(data.bloodGroup) &&
+             data.address is string && data.address.size() >= 3 && data.address.size() <= 500 &&
+             data.createdAt is timestamp && isRecent(data.createdAt) &&
+             (!('lastDonationDate' in data) || (data.lastDonationDate is string && data.lastDonationDate.matches("^\\d{4}-\\d{2}-\\d{2}$"))) &&
+             (!('userId' in data) || (data.userId is string && data.userId == request.auth.uid));
+    }
+
+    function isValidQuestion(data) {
+      return hasRequiredFields(['name', 'text', 'createdAt']) &&
+             hasOnlyAllowedFields(['name', 'text', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 2000 &&
+             data.createdAt is timestamp && isRecent(data.createdAt);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    ((isOwner(userId) && request.resource.data.role == 'user') || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    ((isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.email == resource.data.email) || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Donors collection
+    match /donors/{donorId} {
+      allow read: if true; // Publicly readable for donor search
+      allow create: if isValidDonor(request.resource.data);
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        resource.data.userId == request.auth.uid && 
+        isValidDonor(request.resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastDonationDate', 'address'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Questions collection
+    match /questions/{questionId} {
+      allow read: if isAdmin();
+      allow create: if isValidQuestion(request.resource.data);
+      allow update: if isAdmin() && isValidQuestion(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
